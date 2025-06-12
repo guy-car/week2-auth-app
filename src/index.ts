@@ -1,7 +1,7 @@
 import swagger from "@elysiajs/swagger";
 import { Elysia, t, status } from "elysia";
 import { jwt } from '@elysiajs/jwt'
-
+import { cookie } from '@elysiajs/cookie'
 
 const PORT = 3000
 
@@ -37,23 +37,7 @@ const jwtPlugin = new Elysia()
             secret: SECRET
         })
     )
-    const login = new Elysia()
-    .use(authPlugin)
-    .use(jwtPlugin)
-    .post('/login', async (context) => {
-    const { jwt, isAuthenticated, user } = context as any
-
-    if (!isAuthenticated) {
-        return status(401)
-    }
-        const token = await jwt.sign({ 
-            id: user.id,
-            username: user.username,
-            role: user.role
-        })
-        return { success: true, token: token, message: 'welcome to the promised land!'}
-    })
-
+    
 const protectedPlugin = new Elysia()
     .use(jwtPlugin)
     .derive({ as: 'scoped' }, async ({ headers, jwt }) => {
@@ -73,8 +57,56 @@ const protectedPlugin = new Elysia()
 
     })
 
+const cookiePlugin = new Elysia()
+    .use(cookie())
+
+const login = new Elysia()
+    .use(authPlugin)
+    .use(jwtPlugin)
+    .use(cookiePlugin)
+    .post('/login', async (context) => {
+        const { jwt, isAuthenticated, user, cookie } = context as any
+
+        if (!isAuthenticated) {
+            return status(401)
+        }
+        const token = await jwt.sign({ 
+            id: user.id,
+            username: user.username,
+            role: user.role
+        })
+
+        // set the token as a cookie
+        cookie.authToken.value = token
+
+        return { success: true, token: token, message: 'Logged in! Token set as cookie.'}
+    })
+
 const protectedRoutes = new Elysia()
     .use(protectedPlugin)
+    .use(cookiePlugin) 
+    .derive({ as: 'scoped' }, async ({ cookie, jwt }) => {  // Changed from headers to cookie
+        console.log('Protected derive running...')
+        
+        // Read token from cookie instead of Authorization header
+        const token = cookie.authToken?.value
+        console.log('Token from cookie:', token)
+
+        if (!token) {
+            console.log('No token found in cookie')
+            return { isTokenValid: false, tokenUser: null }
+        }
+        
+        const payload = await jwt.verify(token)
+        console.log('Token payload:', payload)
+        
+        if (payload) {
+            return { isTokenValid: true, tokenUser: payload }
+        } else {
+            return { isTokenValid: false, tokenUser: null }
+        }
+    })
+    
     .get('/protected', (context) => {
         const { isTokenValid, tokenUser } = context as any
 
