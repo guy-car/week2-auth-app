@@ -1,42 +1,100 @@
 import swagger from "@elysiajs/swagger";
-import { Elysia, status } from "elysia";
+import { Elysia, t, status } from "elysia";
+import { jwt } from '@elysiajs/jwt'
+
 
 const PORT = 3000
 
-// Simple API key store (use database in production)
-const validApiKeys = new Set(['api-key-123', 'api-key-456'])
+const SECRET = process.env.SECRET || 'fallback-secret-for-development'
 
-// add a system for issuing api key
+const users = [
+  { id: 1, username: 'guillaume', password: '123', role: 'admin'},
+  { id: 2, username: 'user', password: 'user123', role: 'basic'}
+]
+
+const authPlugin = new Elysia()
+    .derive({ as: 'scoped'}, ({ headers }) => {
+        
+        const { username, password } = headers
+
+        if (!username || !password) {
+            return { isAuthenticated: false, user: null }
+        }
+
+        const user = users.find(u => u.username === username && u.password === password)
+
+        if (user) {
+            return { isAuthenticated: true, user: user}
+        } else {
+            return { isAuthenticated: false, user: null }
+        }
+    })
+
+const jwtPlugin = new Elysia()
+    .use(
+        jwt({
+            name: 'jwt',
+            secret: SECRET
+        })
+    )
+    const login = new Elysia()
+    .use(authPlugin)
+    .use(jwtPlugin)
+    .post('/login', async (context) => {
+    const { jwt, isAuthenticated, user } = context as any
+
+    if (!isAuthenticated) {
+        return status(401)
+    }
+        const token = await jwt.sign({ 
+            id: user.id,
+            username: user.username,
+            role: user.role
+        })
+        return { success: true, token: token, message: 'welcome to the promised land!'}
+    })
+
+const protectedPlugin = new Elysia()
+    .use(jwtPlugin)
+    .derive({ as: 'scoped' }, async ({ headers, jwt }) => {
+        const authHeader = headers.authorization
+
+        if (!authHeader) {
+            return { isTokenValid: false, tokenUser: null }
+        }
+        // Verify the JWT token
+        const payload = await jwt.verify(authHeader)
+        
+        if (payload) {
+            return { isTokenValid: true, tokenUser: payload }
+        } else {
+            return { isTokenValid: false, tokenUser: null }
+        }
+
+    })
 
 const protectedRoutes = new Elysia()
-  .derive({ as: 'local' }, (request) => {
-    return { user: { name: 'guillaume', role: 'admin' }, isAuthenticated: true }
-  })
-  .onBeforeHandle({ as: 'local' }, (request) => {
-    const headers = request.headers
-    const apiKey = headers['x-api-key']
+    .use(protectedPlugin)
+    .get('/protected', (context) => {
+        const { isTokenValid, tokenUser } = context as any
 
-    if (!apiKey) return status(401)
-
-    const isAuthenticated = validApiKeys.has(apiKey)
-
-    if (!isAuthenticated) return status(401)
-
-    if (request.user.role !== 'admin') return status(401)
-  })
-  .get('/protected', () => {
-    return { message: 'access granted! now try /protected-with-context' }
-  })
-  .get('/protected-with-context', ({ user, isAuthenticated }) => {
-    return { message: 'Access granted!', user: user, authenticated: isAuthenticated }
-  })
-// .derive() // exists to add CONTEXT to requests.
+        if (!isTokenValid) {
+            return status(401)
+        }
+        
+        return { 
+            message: 'Access granted!', 
+            user: tokenUser,
+            secretData: 'This is protected information'
+        }
+    })
 
 const app = new Elysia()
   .use(swagger())
   .get('/', () => {
     return { message: "this is public hello world" }
   })
+  .use(login)
   .use(protectedRoutes)
   .listen(PORT)
 

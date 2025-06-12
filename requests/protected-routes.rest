@@ -1,0 +1,2 @@
+GET http://localhost:3000/protected
+Authorization: eyJhbGciOiJIUzI1NiJ9.eyJpZCI6MSwidXNlcm5hbWUiOiJndWlsbGF1bWUiLCJyb2xlIjoiYWRtaW4ifQ.VKwpGi7JlvDuWFPW57jgNxa8A1IXrHkSpMXKgjDYK7g
